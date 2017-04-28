@@ -29,8 +29,15 @@ class Player:
     # Class attribute
     # The system constant, which constrains
     # the change in volatility over time.
-    _tau = 0.5
-
+    _tau = 1
+    size_mult = 1
+    avg = 1
+    def setTau(self, t):
+        self._tau = t
+    def setSize(self, s):
+        self.size_mult = s
+    def setAvg(self, a):
+        self.avg = a
     def getRating(self):
         return (self.__rating * 173.7178) + 1500 
 
@@ -66,7 +73,7 @@ class Player:
         """
         self.__rd = math.sqrt(math.pow(self.__rd, 2) + math.pow(self.vol, 2))
         
-    def update_player(self, rating_list, RD_list, outcome_list):
+    def update_player(self, rating_list, RD_list, outcome_list, size):
         """ Calculates the new rating and rating deviation of the player.
         
         update_player(list[int], list[int], list[bool]) -> None
@@ -77,7 +84,7 @@ class Player:
         RD_list = [x / 173.7178 for x in RD_list]
 
         v = self._v(rating_list, RD_list)
-        self.vol = self._newVol(rating_list, RD_list, outcome_list, v)
+        self.vol = self._newVol(rating_list, RD_list, outcome_list, v, size)
         self._preRatingRD()
         
         self.__rd = 1 / math.sqrt((1 / math.pow(self.__rd, 2)) + (1 / v))
@@ -86,10 +93,10 @@ class Player:
         for i in range(len(rating_list)):
             tempSum += self._g(RD_list[i]) * \
                        (outcome_list[i] - self._E(rating_list[i], RD_list[i]))
-        self.__rating += math.pow(self.__rd, 2) * tempSum
+        self.__rating += math.pow(self.__rd, 2) * tempSum 
         
     #step 5        
-    def _newVol(self, rating_list, RD_list, outcome_list, v):
+    def _newVol(self, rating_list, RD_list, outcome_list, v, size):
         """ Calculating the new volatility as per the Glicko2 system. 
         
         Updated for Feb 22, 2012 revision. -Leo
@@ -104,7 +111,7 @@ class Player:
         
         #step 2
         B = None
-        delta = self._delta(rating_list, RD_list, outcome_list, v)
+        delta = self._delta(rating_list, RD_list, outcome_list, v, size)
         tau = self._tau
         if (delta ** 2)  > ((self.__rd**2) + v):
           B = math.log(delta**2 - self.__rd**2 - v)
@@ -142,7 +149,7 @@ class Player:
       denom1 = 2 * ((self.__rating**2 + v + ex)**2)
       return  (num1 / denom1) - ((x - a) / (self._tau**2))
         
-    def _delta(self, rating_list, RD_list, outcome_list, v):
+    def _delta(self, rating_list, RD_list, outcome_list, v, size):
         """ The delta function of the Glicko2 system.
         
         _delta(list, list, list) -> float
@@ -151,7 +158,7 @@ class Player:
         tempSum = 0
         for i in range(len(rating_list)):
             tempSum += self._g(RD_list[i]) * (outcome_list[i] - self._E(rating_list[i], RD_list[i]))
-        return v * tempSum
+        return v * tempSum * size
         
     def _v(self, rating_list, RD_list):
         """ The v function of the Glicko2 system.
@@ -163,7 +170,7 @@ class Player:
         for i in range(len(rating_list)):
             tempE = self._E(rating_list[i], RD_list[i])
             tempSum += math.pow(self._g(RD_list[i]), 2) * tempE * (1 - tempE)
-        return 1 / tempSum
+        return (1 / (tempSum))* self.size_mult * self.avg
         
     def _E(self, p2rating, p2RD):
         """ The Glicko E function.

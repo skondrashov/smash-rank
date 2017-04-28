@@ -46,7 +46,8 @@ def writeChallongeBracketURLs():
 
 			# Put all tournaments into a list
 			if "http://michigansmash.challonge.com" in l.geturl() and "/module/instructions" not in l.geturl():
-				tournaments.append(l.geturl()) 
+				tournaments.insert(0, l.geturl())
+				#tournaments.append(l.geturl()) 
 	
 
 	f = open("data/challongeBracketURLs.txt", "w")
