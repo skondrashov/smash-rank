@@ -1,21 +1,14 @@
 CREATE DATABASE IF NOT EXISTS MeleeData;
 USE MeleeData
 
-DROP TABLE IF EXISTS
-    ratings,
-    sets,
-    tournaments,
-    attended,
-    users,
-    players;
-
-
 CREATE TABLE players(
-    id      INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-    tag     VARCHAR(50)  NOT NULL,
-    sponsor VARCHAR(50),
-    smashgg_id INT UNSIGNED,
-    skill DOUBLE NOT NULL DEFAULT 1500.0
+    id               INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    tag              VARCHAR(50)  NOT NULL,
+    sponsor          VARCHAR(50),
+    smashgg_id       INT UNSIGNED,
+    rating           DOUBLE NOT NULL,
+    rating_deviation DOUBLE NOT NULL,
+    volatility       DOUBLE NOT NULL
     /*
     -- tournaments attended:
         SELECT id FROM tournaments t
@@ -40,22 +33,21 @@ CREATE TABLE users(
     player_id   INT UNSIGNED,
     first_name  VARCHAR(50),
     last_name   VARCHAR(50),
-    facebook_id VARCHAR(50)
-    ,
+    facebook_id VARCHAR(50),
     FOREIGN KEY (player_id)
         REFERENCES players(id)
         ON DELETE SET NULL
     -- add other profile information
 );
 
-
-
 CREATE TABLE tournaments(
-    id       INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-    name     VARCHAR(100) NOT NULL,
-    series   VARCHAR(100),
-    location VARCHAR(100) NOT NULL,
-    date     TIMESTAMP    NOT NULL
+    id        INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
+    id_string VARCHAR(100) NOT NULL,
+    host      VARCHAR(16)  NOT NULL,
+    name      VARCHAR(100) NOT NULL,
+    series    VARCHAR(100),
+    location  VARCHAR(100) NOT NULL,
+    date      TIMESTAMP    NOT NULL
     /*
     -- entrants can be found with (for example):
         SELECT (COUNT(winner_id) + COUNT(loser_id)) AS entrants
@@ -64,24 +56,16 @@ CREATE TABLE tournaments(
     */
 );
 
-CREATE TABLE attended(
-    id              INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-    player_id       INT UNSIGNED NOT NULL,
-    tournament_id   INT UNSIGNED NOT NULL,
-    FOREIGN KEY (player_id) REFERENCES players(id),
-    FOREIGN KEY (tournament_id) REFERENCES tournaments(id)
-);
-
 -- bracket can be built using losers_bracket and sets_remaining, and displayed by matching match participants to prior match winner_ids
 CREATE TABLE sets(
     id             INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-    tournament_id  INT UNSIGNED     NOT NULL,
-    winner_id      INT UNSIGNED     NOT NULL,
-    loser_id       INT UNSIGNED     NOT NULL,
-    best_of        SMALLINT,
+    tournament_id  INT UNSIGNED NOT NULL,
+    winner_id      INT UNSIGNED NOT NULL,
+    loser_id       INT UNSIGNED NOT NULL,
+    best_of        SMALLINT UNSIGNED,
     loser_wins     SMALLINT,
     sets_remaining SMALLINT UNSIGNED NOT NULL,
-    is_losers      BOOLEAN          NOT NULL,
+    is_losers      BOOLEAN NOT NULL,
     FOREIGN KEY (tournament_id) REFERENCES tournaments(id)
         ON DELETE CASCADE,
     FOREIGN KEY (winner_id)     REFERENCES players(id),

@@ -1,10 +1,9 @@
 import json
-import pickle
 import glicko2
 import re
 import operator
 import Queue
-from challonge import participants, matches, tournaments
+#from challonge import participants, matches, tournaments
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
 import WriteBrackets
@@ -14,408 +13,150 @@ import re
 import pysmash
 import math
 
-''''''
-# http://stackoverflow.com/questions/19201290/how-to-save-a-dictionary-to-a-file
+def prompt(type, value):
+	return input("Retrieved "+type+": "+value+". Press Enter if this is correct or type the correct value:\n\t") or value
 
-# Update the pkl file
-def saveObj(obj, path):
-	with open(path, 'wb') as f:
-		pickle.dump(obj, f, pickle.HIGHEST_PROTOCOL)
+def strip_tag(tag):
+	return "".join(c for c in tag if c.isalnum()).lower()
 
-# Return the data at path
-def loadObj(path):
-	with open(path, 'rb') as f:
-		return pickle.load(f)	
-''''''
+db_connection = mariadb.connect(
+		user="root",
+		passwd="paradise",
+		database="MeleeData",
+		host="localhost",
+		use_unicode = True,
+		charset = "utf8"
+	)
+db_cursor = db_connection.cursor()
 
-class Match:
-	def __init__(self, player1name, player1score, player2name, player2score):
-		self.player1name = player1name
-		self.player1score = player1score
-		self.player2name = player2name
-		self.player2score = player2score
+matches = []
+players = {}
+for url in open('data/brackets.txt', 'r'):
+	url = url.lower().replace('http://', '').replace('https://', '')
 
-class RaterSetup:
-	
-	def __init__(self, pathToPlayers, pathToMatches):
-		
-		self.db = mariadb.connect(host="localhost",
-                     user="mingee",         # your username
-                     passwd="",  # your password
-                     db="MeleeData",         # name of the data base
-                     use_unicode = True,
-                     charset = "utf8")
-		self.pathToPlayers = pathToPlayers
-		self.pathToMatches = pathToMatches
-		
-		# Player names |-> Glicko2 Player objects
-		self.players = {}
-		self.playersInTournament = {}
-		# Check is loadObj is a file. If so, then load the object. Otherwise start fresh lol.
-		# 
-		# self.players = loadObj(pathToPlayers)
-		self.matches = []
-		
-		self.tournaments = []
-		self.currentTID = 0
-		self.bracket_size = 0.0
-		currentTournament = []
-		# Write to bracket URLs files
-		# WriteBrackets.writeChallongeBracketURLs()
-		# WriteBrackets.writeSmashGGBracketURLs()
+	tournament = {}
+	with url.split('/')[0].split('.') as hostname_parts:
+		host = hostname_parts[-2]
 
-		# Fill list of matches
-		self.__setMatches()	
-		cur = self.db.cursor()
-
-		while self.tournaments:
-			currentTournament = self.tournaments.pop(0)
-	 		tournament_name = ''
-	 		#Tournament is Challonge
-			if currentTournament[1] == 'c':
-				#self.bracket_size = 
-				self.__setChallongeMatches(currentTournament[0])
-				if('-' in currentTournament[0]):
-					tournament_name = currentTournament[0].split('-')[1].lower()
-					cur.execute("SELECT id FROM tournaments WHERE name = %s;", [tournament_name])
-				else:		
-					tournament_name = currentTournament[0]		
-					cur.execute("SELECT id FROM tournaments WHERE name = %s;", [tournament_name])
-
-			#Tournament is on Smash.GG
-			else:
-				self.bracket_size = self.__setSmashGGMatches(currentTournament[0])
-				tournament_name = currentTournament[0].split("/tournament/")[1].split("/")[0]
-				cur.execute("SELECT id FROM tournaments WHERE name = %s;", [tournament_name])
-			print tournament_name
-			print self.bracket_size
-			result = cur.fetchone()
-			self.currentTID = result[0]
-			
-			# Fill map of players to Glicko2 Player objects
-			self.__setPlayers()
-
-			# Write list of matches to text file	
-			# self.__writeMatches()
-			
-
-			
-			# Write file of player map (.pkl)
-			self.__writePlayers()
-			self.matches = []
-		self.db.close()
-	def getPlayerMap(self):
-		return self.players	
-		
-	def __setMatches(self):
-		minParticipants = 32
-		# challongeTournamentIds = self.__getChallongeTournamentIds()
-		# for tournament in challongeTournamentIds:
-		# 	self.tournaments.append((tournament, 'c'))
-		
-		# smashGGTournamentURLs = self.__getSmashGGTournamentURLs()
-		# for tournament in smashGGTournamentURLs:
-		# 	self.tournaments.append((tournament, 's'))
-		
-		self.__getTournamentIds()
-
-	def __getTournamentIds(self):
-
-
-		tournamentIds = []
-		with open("data/brackets.txt", "r") as f:
-			for line in f:
-				line = line.lower()
-				name = line[8:].rstrip()
-				if name.split('/')[0] == "smash.gg":
-					self.tournaments.append((line.strip(), 's'))
-				else:
-					url = line.split(".")
-					if url[1] == "challonge":
-						name = line[7:].rstrip()
-						challongetitle = name.split('.')[0]
-						brackettitle = name.split('/')[1]
-						self.tournaments.append((challongetitle + '-' + brackettitle, 'c'))
-					else:
-						name = line[21:].rstrip()
-						self.tournaments.append(("" + name, 'c'))
-			self.tournaments = filter(None, self.tournaments)
-		return tournamentIds
-
-
-
-
-	def __getChallongeTournamentIds(self):
-		# Make a list of challonge tournament Ids
-		challongeTournamentIds = []
-		with open("data/challongeBracketURLs.txt", "r") as f:
-			for line in f:
-				url = line.split(".")
-				if url[1] == "challonge":
-					name = line[7:].rstrip()
-					challongetitle = name.split('.')[0]
-					brackettitle = name.split('/')[1]
-					challongeTournamentIds.append(challongetitle + '-' + brackettitle)
-				else:
-					name = line[21:].rstrip()
-					challongeTournamentIds.append("" + name)
-
-		return challongeTournamentIds
-
-	def __getSmashGGTournamentURLs(self):
-		# Make a list of smashGG tournament URLs
-		smashGGURLs = []
-		f = open("data/smashGGBracketURLs.txt", "r")
-		for line in f:
-			line = line.lower()
-			line = line.replace("-", "")
-			smashGGURLs.append(line.strip())
-		smashGGURLs = filter(None, smashGGURLs)
-		return smashGGURLs
-
-		
-	# Purpose: Compile list of Match objects from Challonge
-	# In:      tournamentIds - list of tournament names in format:
-	# 		   michigansmash-<name>
-	#		   tournaments must be in chronological order (oldest to youngest)
-	#		   minParticipants - ignore tournaments with fewer participants
-	# Out:	   List of Match objects of Challonge matches in chronological order
-	#		   (oldest to youngest)
-	def __setChallongeMatches(self, tournamentId):
-		
-		APIkey = "2tyMsGrcQanAq3EQeMytrsGrdMMFutDDz0BxNAAh"
-		tournamentsURL = "https://Amirzy:" + APIkey + "@api.challonge.com/v1/tournaments/"
-		
-		# Create cursor to execute queries
-		cur = self.db.cursor()
-
-		# Construct list of Match objects from all tournaments
-
-
-		#
-		#
-		#
-		# Don't do it if you already have the tournament in the database ugh
-		#
-		#
-
-		# Add the tournament to the database
-		tournament_name = ''
-
-		if('-' in tournamentId):
-			tournament_name = tournamentId.split('-')[1].lower()
-			q = (0, tournament_name, stripNum(tournament_name), 'Ann Arbor')	
-			cur.execute("INSERT INTO tournaments (id, name, series, location, date) VALUES (%s, %s, %s, %s, default);", q)
+		if host == "challonge":
+			tournament['id_string'] = (hostname_parts[0] + '-' + url.split('/')[1]).lower()
 		else:
-			tournament_name = tournamentId
-			q = (0, tournamentId, stripNum(tournamentId), 'Ann Arbor')	
-			cur.execute("INSERT INTO tournaments (id, name, series, location, date) VALUES (%s, %s, %s, %s, default);", q)
+			print("Bad URL in input: " + url)
+	tournament['host'] = host
 
+	print("Loading tournament: " + tournament['id_string'])
 
-		# A tournament participant is object w/ player id for this tournament
-		participantsInTournament = requests.get(tournamentsURL + tournamentId + "/participants.json").json()
+	# skip existing
+	db_cursor.execute("SELECT 1 FROM tournaments WHERE id_string = %s LIMIT 1", [tournament['id_string']])
+	if db_cursor.fetchone() is not None:
+		print("Tournament already saved in database; skipping.\n")
+		continue
 
-		# Maps player Ids to player names
-		IdToPlayerName = {}
-		partSize = 0
-		# Compile id:name map
+	if host == "challonge":
+		data = {}
+		try:
+			for data_type, subpath in [(t, tournament['id_string']+s) for t,s in [('tournament',''),('matches','/matches'),('participants','/participants')]]:
+				uri = 'https://api.challonge.com/v1/tournaments/'+subpath+'.json'
+				print("Contacting API at %s..." % uri)
+				data[data_type] = requests.get(uri+'?api_key=XBFwcbaWSvrfHiaNONNgwyfPo8LrYozALwIWfkBd').json()
+		except Exception as e:
+			print("Error accessing %s." % uri)
+			print(e)
+			continue
 
-		cur.execute("SELECT id FROM tournaments WHERE name = %s;", [tournament_name])
-		tournament_id = cur.fetchone()[0]
-		for p in participantsInTournament:
-			# Get playername
-			partSize += 1
-			playerName = p["participant"]["display_name"]
-			playerName = playerName.lower()
-			playerName = playerName.replace(" ", "")
-			playerName = playerName.replace("\t", "")
-			playerName = playerName.replace("(unpaid)", "")
+		with data['tournament']['tournament'] as t:
+			tournament['name'] = prompt('name', t['name'])
+			tournament['date'] = prompt('date', t['started_at'].split('T')[0])
 
+		series_parts = tournament['name'].rsplit(None, 1)
+		if len(series_parts) == 2 and all(c in '0123456789XVI' for c in series_parts[1]):
+			series = series_parts[0]
+		else:
+			series = ''
+		tournament['series'] = prompt('series', series)
 
-			if ('|') in playerName:
-				playerName = playerName.split('|')[-1]
+		tournament['entrants'] = data['tournament']['participants_count']
+		if tournament['entrants'] != len(data['participants']):
+			print("Error: Only " + len(data['participants']) + " out of " + tournament['entrants'] + "  entrants have data.")
+			return
 
-			re.sub(r"[^\\x00-\\x7f]", "", playerName)
-			playerName.replace(u"\u2122", '')
-			#print playerName
-			# Add to map
-			IdToPlayerName[p["participant"]["id"]] = playerName
+		for player in data['participants']:
+			player = player['participant']
+			display_name = participant['name']
+			sponsor, tag = display_name.split('|') if '|' in display_name else (None, display_name)
+			players[strip_tag(tag)] = {'display_name': display_name, 'sponsor': sponsor}
 
+	with tournament as t:
+		db_cursor.execute("""
+			INSERT INTO tournaments (id_string,      host,      name,      series,      date,     location)
+			VALUES                  ('%s',           '%s',      '%s',      '%s',        '%s',     'MI')
+			""",                    (t['id_string'], t['host'], t['name'], t['series'], t['date']))
+	db_connection.commit()
+	print("Inserted tournament data:")
+	print(tournament)
 
+	db_cursor.execute("""
+		SELECT id, display_name, tag, rating, rating_deviation, volatility
+		FROM players
+		WHERE tag IN (%s)""", [','.join(['"' + tag + '"' for tag in players.keys()])])
 
-			cur.execute("SELECT id FROM players WHERE tag = %s;", [playerName])
-			p1_id = cur.fetchone()
+	for player_id, display_name, tag, rating, rating_deviation, volatility in db_cursor.fetchall():
+		player = players[tag]
+		if display_name != player.display_name:
+			db_cursor.execute("""
+				UPDATE players SET (sponsor,        display_name)
+				VALUES             ('%s',           '%s')              WHERE id = %s)
+				""",               (player.sponsor, player.display_name,          player_id))
+			db_connection.commit()
+			print("Player %s updated to: %s" % (display_name, player.display_name))
+		players.glicko2 = glicko2.Player(rating, rating_deviation, volatility)
 
-			if not p1_id:
-				self.players[playerName] = glicko2.Player()
-				p1 = (0, playerName)	
-				cur.execute("INSERT INTO players (id, tag, sponsor, skill) VALUES (%s, %s, null, default);", p1)
-							
+	for tag in players.keys():
+		player = players[tag]
+		if player.glicko2:
+			continue
+		player.glicko2 = glicko2.Player()
 
-			cur.execute("SELECT id FROM players WHERE tag = %s;", [playerName])
-			player_id = cur.fetchone()[0]
-			
+		with player as p:
+			with p.glicko2 as g2:
+				db_cursor.execute("""
+					INSERT INTO players (sponsor,   tag,  display_name,   rating,    rating_deviation, volatility)
+					VALUES              ('%s',      '%s', '%s',           %s,        %s,               %s)
+					""",                (p.sponsor, tag,  p.display_name, g2.rating, g2.rd,            g2.vol))
+		db_connection.commit()
+		print("New player added to database: %s" % player.display_name)
 
-			cur.execute("INSERT INTO attended (id, player_id, tournament_id) VALUES (%s, %s, %s);", [0, player_id, tournament_id])
-			self.db.commit()
-		self.bracket_size = partSize	
-		# Dictionary from int index to json match objects
-		jsonMatchesDict = requests.get(tournamentsURL + tournamentId + "/matches.json").json()
-		
-		# Turn the dict into a list
-		jsonMatches = []
-		for i in range(0, len(jsonMatchesDict)):
-			jsonMatches.append(jsonMatchesDict[i]["match"])
-		
-		# Scores must be of the format ">-<"
-		scoreFormat = re.compile("\d+-\d+")
-		
-		# Compile the list of Match objects
-		for jsonMatch in jsonMatches:
+	scoreFormat = re.compile("\d+-\d+")
+	for match in data['matches']:
+		match = match['match']
 
-			# Some scores are not of the right format, so skip these
-			scoreStr = jsonMatch["scores_csv"]
-			if not scoreFormat.match(scoreStr):
-				return
-			
-			# Extract scores
-			separatorIndex = scoreStr.index("-")
-			player1score = int(scoreStr[:separatorIndex])
-			player2score = int(scoreStr[separatorIndex+1:])
-			
-			# Extract names
-			player1name = IdToPlayerName[jsonMatch["player1_id"]].lower()
-			player2name = IdToPlayerName[jsonMatch["player2_id"]].lower()
+		# scores in the wrong format are DQs and do not count for rating
+		if not scoreFormat.match(match['scores_csv']):
+			continue
 
+		p1_score, p2_score = match['scores_csv'].split('-')
+		p1_tag = strip_tag(match['player1_id'])
+		p2_tag = strip_tag(match['player2_id'])
+		matches.append({
+				'p1': {
+					'tag':   p1_tag,
+					'score': p1_score
+				},
+				'p2': {
+					'tag':   p2_tag,
+					'score': p2_score
+				}
+			})
 
-			# Add all players to dictionary as unrated Glicko2 player objects, as well as the database
+		db_cursor.execute("""
+			INSERT INTO sets (tournament_id, winner_id, loser_id, best_of, loser_wins, sets_remaining, is_losers)
+			VALUES           (%s, %s, %s, %s, %s, %s, %s)
+			""", ())
 
-			
-			newMatch = Match(player1name, player1score, player2name, player2score)
-			self.matches.append(newMatch)
-
-		
-
-			# Use all the SQL you like
-
-
-		# print all the first cell of all the rows
-		self.db.commit()
-		cur.close()
-		
-	# Purpose: Compile list of Match objects from SmashGG
-	# In:      tournament_URLs - list of tournament URLs in format:
-	# Out:	   List of Match objects of SmashGG matches in chronological order
-	#		   (oldest to youngest)
-	def __setSmashGGMatches(self, url):
-		cur = self.db.cursor()
-			#Smash.gg wrapper
-		smash = pysmash.SmashGG()
-
-		# Get tournament name
-
-		tournament_name = url.split("/tournament/")[1].split("/")[0]
-
-
-		#
-		#
-		# Ann Arbor should be replaced by region use tourney information to find venue address and get State from there. 
-		#
-		#
-		p = (0, tournament_name, stripNum(tournament_name), 'Ann Arbor')	
-		cur.execute("INSERT INTO tournaments (id, name, series, location, date) VALUES (%s, %s, %s, %s, default);", p)
-
-		players = smash.tournament_show_players(tournament_name, 'melee-singles')
-
-
-		# Add all players to database if they're not in there already
-		for player in players:
-
-			# Santitize tag of fuckery
-			tag = player['tag'].lower()
-			tag = tag.replace(" ", "")
-			re.sub(r"[^\\x00-\\x7f]", "", tag)
-			tag.replace(u"\u2122", '')
-			#tag = str(tag.encode('ascii', 'replace'))
-			cur.execute("SELECT * FROM players WHERE tag = %s;", [tag])
-			result = cur.fetchone()
-
-			# Add player to database
-			if not result:	
-				self.players[tag] = glicko2.Player()
-				p = (0, tag, player['entrant_id'])	
-				cur.execute("INSERT INTO players (id, tag, sponsor, smashgg_id, skill) VALUES (%s, %s, null, %s, default);", p)				
-			else:
-				p = (player['entrant_id'], tag)
-				cur.execute("UPDATE players SET smashgg_id = %s WHERE tag = %s;", p)
-
-			self.db.commit()
-			cur.execute("SELECT id FROM players WHERE tag = %s;", [tag])
-			player_id = cur.fetchone()[0]
-			cur.execute("SELECT id FROM tournaments WHERE name = %s;", [tournament_name])
-			tournament_id = cur.fetchone()[0]
-
-			cur.execute("INSERT INTO attended (id, player_id, tournament_id) VALUES (%s, %s, %s);", [0, player_id, tournament_id])
-		self.db.commit()
-
-		# Split this into another function 
-		sets = smash.tournament_show_sets(tournament_name, 'melee-singles')
-
-		for match in sets:
-			entrant1Id = match['entrant_1_id']
-			entrant2Id = match['entrant_2_id']
-			winner_id = match['winner_id']
-			loser_id = match['loser_id']
-			entrant1_tag = ''
-			entrant2_tag = ''
-			winner_tag = ''
-			loser_tag = ''
-			winner_set_count = 0
-			loser_set_count = 0
-			entrant1Score = match['entrant_1_score']
-			entrant2Score = match['entrant_2_score']
-			cur.execute("SELECT tag FROM players WHERE smashgg_id = %s;", [entrant1Id])
-			entrant1_tag = cur.fetchone()[0]
-			cur.execute("SELECT tag FROM players WHERE smashgg_id = %s;", [entrant2Id])
-			entrant2_tag = cur.fetchone()[0]
-	
-			if entrant1_tag and entrant2_tag:
-				entrant1_tag = entrant1_tag.lower()
-				entrant1_tag = entrant1_tag.replace(" ", "")
-				entrant2_tag = entrant2_tag.lower()
-				entrant2_tag = entrant2_tag.replace(" ", "")
-				newMatch = Match(entrant1_tag, entrant1Score, entrant2_tag, entrant2Score)
-				self.matches.append(newMatch)
-		
-		self.db.commit()
-		cur.close()
-
-		return len(players)
-	# Purpose: Write info of Match objects in txt file
-	def __writeMatch(self, match):
-		cur = self.db.cursor()
-		cur.execute("SELECT id FROM players WHERE tag = %s;", [match.player1name])
-		p1_id = cur.fetchone()[0]
-
-		cur.execute("SELECT id FROM players WHERE tag = %s;", [match.player2name])
-		p2_id = cur.fetchone()[0]
-		if not (match.player1score == None or match.player2score == None):
-			if match.player1score > match.player2score:
-				data = (0, self.currentTID, p1_id, p2_id, match.player1score, match.player2score, 0, True)
-				cur.execute("INSERT INTO sets (id, tournament_id, winner_id, loser_id, best_of, loser_wins, sets_remaining, is_losers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);", data)
-			else:
-				data = (0, self.currentTID, p2_id, p1_id, match.player2score, match.player1score, 0, True)
-				cur.execute("INSERT INTO sets (id, tournament_id, winner_id, loser_id, best_of, loser_wins, sets_remaining, is_losers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);", data)
+		data = (0, self.currentTID, p2_id, p1_id, match.player2score, match.player1score, 0, True)
+		self.db_cursor.execute("INSERT INTO sets (id, tournament_id, winner_id, loser_id, best_of, loser_wins, sets_remaining, is_losers) VALUES (%s, %s, %s, %s, %s, %s, %s, %s);", data)
 
 		self.db.commit()
-		cur.close()
-
-
-
-
-
-
-
 
 	# Purpose: Use this function once. It is for constructing the .pkl data file
 	# 		   that will store the map of player names to ratings.
@@ -424,15 +165,14 @@ class RaterSetup:
 	def __setPlayers(self):
 		# cur = self.db.cursor()
 		# tournmentName = tournamentId.split('-')[1].lower()
-		# p = (0, tournmentName, stripNum(tournmentName), 'Ann Arbor')	
-		# cur.execute("INSERT INTO tournaments (id, name, series, location, date) VALUES (%s, %s, %s, %s, default);", p)
+		# p = (0, tournmentName, stripNum(tournmentName), 'Ann Arbor')
+		# db_cursor.execute("INSERT INTO tournaments (id, name, series, location, date) VALUES (%s, %s, %s, %s, default);", p)
 		# self.db.commit()
-		# cur.close()
+		# db_cursor.close()
 		# self.db.close()
 
-		cur = self.db.cursor()
-		# cur.execute("SELECT P.skill FROM players P, attended A, tournaments T WHERE T.id = A.tournament_id AND P.id = A.player_id AND T.id = %s ORDER BY P.skill DESC;", [self.currentTID])
-		# skill_list = cur.fetchall()
+		# db_cursor.execute("SELECT P.skill FROM players P, attended A, tournaments T WHERE T.id = A.tournament_id AND P.id = A.player_id AND T.id = %s ORDER BY P.skill DESC;", [self.currentTID])
+		# skill_list = db_cursor.fetchall()
 		# skill_sum = 0.0
 
 		# skill_list = skill_list[0:4]
@@ -458,16 +198,16 @@ class RaterSetup:
 		# elif average_skill <= 2600:
 		# 	print 2.0
 		# 	average_skill = 2.0
-		# elif average_skill <= 2800:	
+		# elif average_skill <= 2800:
 		# 	print 2.3
 		# 	average_skill = 2.3
-		# elif average_skill <= 3000:	
+		# elif average_skill <= 3000:
 		# 	print 2.6
 		# 	average_skill = 2.6
-		# elif average_skill <= 3200:	
+		# elif average_skill <= 3200:
 		# 	print 3.0
 		# 	average_skill = 3.0
-		# elif average_skill <= 3400:	
+		# elif average_skill <= 3400:
 		# 	print 3.5
 		# 	average_skill = 3.5
 
@@ -483,9 +223,8 @@ class RaterSetup:
 		# 	size = math.pow(math.log(self.bracket_size, 4) - 1, 2)
 		# 	v.setSize(size)
 		# 	v.setAvg(average_skill)
-		
-		for match in self.matches:
 
+		for match in self.matches:
 			p1name = match.player1name
 			p2name = match.player2name
 			p1score = match.player1score
@@ -499,21 +238,18 @@ class RaterSetup:
 			self.players[p2name].update_player([self.players[p1name].getRating()], [self.players[p1name].getRd()], [p1score < p2score], 1)
 			self.players[p1name] = temp
 
-
-
 			p1rating = self.players[p1name].getRating()
 			p2rating = self.players[p2name].getRating()
-			cur.execute("UPDATE players SET skill = %s WHERE tag = %s;", [p1rating, p1name])
-			cur.execute("UPDATE players SET skill = %s WHERE tag = %s;", [p2rating, p2name])
+			self.db_cursor.execute("UPDATE players SET skill = %s WHERE tag = %s;", [p1rating, p1name])
+			self.db_cursor.execute("UPDATE players SET skill = %s WHERE tag = %s;", [p2rating, p2name])
 
 			# Update the rating deviation of all other players
 			for playerName in self.players:
 				if playerName != p1name and playerName != p2name:
 					self.players[playerName].did_not_compete()
 		self.db.commit()
-		cur.close()
 
-	
+
 	# Purpose: Persist the map of players
 	def __writePlayers(self):
 		selfref_list = [1, 2, 3]
@@ -523,10 +259,10 @@ class RaterSetup:
 		pickle.dump(selfref_list, output, -1)
 		output.close()
 
-	
+
 
 def writeCSVofPlayers(pathToPlayersCSV, players):
-	
+
 	f = open(pathToPlayersCSV, "w")
 	f.write("\"Name\",\"Rating\",\"Rating Deviation\",\"Volatility\"\n")
 	for player in players:
@@ -537,20 +273,20 @@ def writeCSVofPlayers(pathToPlayersCSV, players):
 	f.close()
 
 def stripNum(str_in):
-    digit_list = "1234567890"
-    for char in digit_list:
-        str_in = str_in.replace(char, "")
+	digit_list = "1234567890"
+	for char in digit_list:
+		str_in = str_in.replace(char, "")
 
-    return str_in
+	return str_in
 
 def main():
 	requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 	pathToMatches = "data/matches.txt"
 	pathToPlayers = "data/players.pkl"
-	
+
 	# Will map names to glicko2.player()'s
 	players = {}
-	
+
 	# Uncomment to construct all files from scratch and comment out the loadObj line
 	players = RaterSetup(pathToPlayers, pathToMatches).getPlayerMap()
 	players = loadObj(pathToPlayers)
