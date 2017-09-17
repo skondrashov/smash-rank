@@ -2,8 +2,7 @@ CREATE DATABASE IF NOT EXISTS MeleeData;
 USE MeleeData
 
 CREATE TABLE players(
-    id               INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-    tag              VARCHAR(50)  NOT NULL,
+    tag              VARCHAR(50) PRIMARY KEY,
     sponsor          VARCHAR(50),
     smashgg_id       INT UNSIGNED,
     rating           DOUBLE NOT NULL,
@@ -30,24 +29,23 @@ CREATE TABLE users(
     id          INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
     username    VARCHAR(50)  NOT NULL,
     password    BINARY(64)   NOT NULL,
-    player_id   INT UNSIGNED,
+    tag         VARCHAR(50),
     first_name  VARCHAR(50),
     last_name   VARCHAR(50),
     facebook_id VARCHAR(50),
-    FOREIGN KEY (player_id)
-        REFERENCES players(id)
+    FOREIGN KEY (tag)
+        REFERENCES players(tag)
         ON DELETE SET NULL
     -- add other profile information
 );
 
 CREATE TABLE tournaments(
-    id        INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-    id_string VARCHAR(100) NOT NULL,
-    host      VARCHAR(16)  NOT NULL,
-    name      VARCHAR(100) NOT NULL,
-    series    VARCHAR(100),
-    location  VARCHAR(100) NOT NULL,
-    date      TIMESTAMP    NOT NULL
+    id       VARCHAR(100) PRIMARY KEY,
+    host     VARCHAR(16)  NOT NULL,
+    name     VARCHAR(100) NOT NULL,
+    series   VARCHAR(100),
+    location VARCHAR(100) NOT NULL,
+    date     TIMESTAMP    NOT NULL
     /*
     -- entrants can be found with (for example):
         SELECT (COUNT(winner_id) + COUNT(loser_id)) AS entrants
@@ -59,28 +57,16 @@ CREATE TABLE tournaments(
 -- bracket can be built using losers_bracket and sets_remaining, and displayed by matching match participants to prior match winner_ids
 CREATE TABLE sets(
     id             INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-    tournament_id  INT UNSIGNED NOT NULL,
-    winner_id      INT UNSIGNED NOT NULL,
-    loser_id       INT UNSIGNED NOT NULL,
-    best_of        SMALLINT UNSIGNED,
-    loser_wins     SMALLINT,
-    sets_remaining SMALLINT UNSIGNED NOT NULL,
-    is_losers      BOOLEAN NOT NULL,
-    FOREIGN KEY (tournament_id) REFERENCES tournaments(id)
-        ON DELETE CASCADE,
-    FOREIGN KEY (winner_id)     REFERENCES players(id),
-    FOREIGN KEY (loser_id)      REFERENCES players(id)
-);
-
-CREATE TABLE ratings(
-    id            INT UNSIGNED PRIMARY KEY AUTO_INCREMENT,
-    player_id     INT UNSIGNED NOT NULL,
-    opponent_id   INT UNSIGNED NOT NULL,
-    tournament_id INT UNSIGNED NOT NULL,
-    set_id        INT UNSIGNED NOT NULL,
-    rating        DOUBLE       NOT NULL,
-    FOREIGN KEY (player_id)     REFERENCES players(id)     ON DELETE CASCADE,
-    FOREIGN KEY (opponent_id)     REFERENCES players(id)     ON DELETE CASCADE,
+    tournament_id  VARCHAR(100) NOT NULL,
+    winner_tag     VARCHAR(50)  NOT NULL,
+    winner_rating  DOUBLE       NOT NULL,
+    loser_tag      VARCHAR(50)  NOT NULL,
+    loser_rating   DOUBLE       NOT NULL,
+    best_of        SMALLINT     UNSIGNED NOT NULL,
+    loser_wins     SMALLINT     UNSIGNED NOT NULL,
+    sets_remaining SMALLINT     UNSIGNED NOT NULL,
+    is_losers      BOOLEAN      NOT NULL,
     FOREIGN KEY (tournament_id) REFERENCES tournaments(id) ON DELETE CASCADE,
-    FOREIGN KEY (set_id)        REFERENCES sets(id)        ON DELETE CASCADE
+    FOREIGN KEY (winner_tag)    REFERENCES players(tag),
+    FOREIGN KEY (loser_tag)     REFERENCES players(tag)
 );
