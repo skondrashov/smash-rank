@@ -116,8 +116,6 @@ for url in open('data/brackets.txt', 'r'):
 
 	for tag, sponsor, rating, rating_deviation, volatility in db_cursor.fetchall():
 		players[tag]['glicko2'] = glicko2.Player(rating, rating_deviation, volatility)
-		if sponsor != players[tag]['sponsor']:
-			players[tag]['new_sponsor'] = sponsor
 
 	for tag, p in players.iteritems():
 		if 'glicko2' not in p:
